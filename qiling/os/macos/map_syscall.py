@@ -747,6 +747,7 @@ x8664_syscall_table = {
     427: 'fsgetpath',
     428: 'audit_session_self',
     429: 'audit_session_join',
+    438: 'shared_region_map_and_slide_np',
     483: 'csrctl',
     500: 'getentropy',
     520: 'terminate_with_payload',

@@ -23,6 +23,9 @@ class QlErrorFileNotFound(QlErrorBase):
 class QlErrorFileType(QlErrorBase):
     pass
 
+class QlErrorFileLoadFailure(QlErrorBase):
+    pass
+
 class QlErrorOsType(QlErrorBase):
     pass
 

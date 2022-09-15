@@ -76,9 +76,11 @@ def ql_syscall_poll(ql, target, address, size, *args, **kw):
 
 # 0xa
 def ql_syscall_kernelrpc_mach_vm_allocate_trap(ql, port, addr, size, flags, *args, **kw):
+    print('arch_pc: %x' % ql.arch.regs.arch_pc)
     ql.log.debug("[mach] mach vm allocate trap(port: 0x%x, addr: 0x%x, size: 0x%x, flags: 0x%x" % (port, addr, size, flags))
     mmap_address = ql.os.macho_task.min_offset
-    mmap_end = page_align_end(mmap_address + size, PAGE_SIZE)
+    mmap_end = ql.mem.align_up(mmap_address + size)
+    ql.log.debug("vm alloc form 0x%x to 0x%0x" % (mmap_address, mmap_end))
     ql.mem.map(mmap_address, mmap_end - mmap_address)
     ql.mem.write(mmap_address, b'\x00'*(mmap_end - mmap_address))
     ql.os.macho_task.min_offset = mmap_end
@@ -380,21 +382,48 @@ def ql_syscall_open_nocancel(ql, filename, flags, mode, *args, **kw):
         ql.log.debug("File Not Found %s" % relative_path)
     return regreturn
 
+# 0x1ab
+def ql_syscall_fsgetpath(ql, restrict_buf, buflen, fsid, obj_id):
+    print("~~~fsgetpath(fsid: %d)" % (fsid))
+
 # 0x1b6
-def ql_syscall_shared_region_map_and_slide_np(ql, fd, count, mappings_addr, slide, slide_start, slide_size):
+def ql_syscall_shared_region_map_and_slide_np(ql, fd, mappings_count, mappings_addr, slide, slide_start, slide_size):
     ql.log.debug("shared_region_map_and_slide_np(fd: %d, count: 0x%x, mappings: 0x%x, slide: 0x%x, slide_start: 0x%x, slide_size: 0x%x)" % (
-                fd, count ,mappings_addr, slide, slide_start, slide_size
+                fd, mappings_count ,mappings_addr, slide, slide_start, slide_size
             ))
-    mapping_list = []
-    for i in range(count):
-        mapping = SharedFileMappingNp(ql)
-        mapping.read_mapping(mappings_addr)
-        ql.os.fd[fd].seek(mapping.sfm_file_offset)
-        content = ql.os.fd[fd].read(mapping.sfm_size)
-        ql.mem.write(mapping.sfm_address, content)
+
+    # Jump some check
+    # Read in the mappings and translate to new format.
+    mappings = []
+    shared_files = []
+    for i in range(mappings_count):
+        legacy_mapping = SharedFileMappingNp(ql)
+        legacy_mapping.read_mapping(mappings_addr)        
+        mapping = SharedFileMappingSlideNp(ql)
+        mapping.translate(legacy_mapping.sfm_address,
+                          legacy_mapping.sfm_size,
+                          legacy_mapping.sfm_file_offset,
+                          legacy_mapping.sfm_max_prot,
+                          legacy_mapping.sfm_init_prot,
+                          slide_size,
+                          slide_start)
+
+        # ql.os.fd[fd].lseek(mapping.sfm_file_offset)
+        # content = ql.os.fd[fd].read(mapping.sfm_size)
+        # ql.mem.write(mapping.sfm_address, content)
         mappings_addr += mapping.size
-        mapping_list.append(mapping)
-    return slide_size
+        mappings.append(mapping)
+
+        shared_file = SharedFileNp(ql)
+        shared_file.sf_fd = fd
+        shared_file.sf_mappings_count = mappings_count
+        shared_file.sf_slide = slide
+        shared_files.append(shared_file)
+
+    kr = shared_region_map_and_slide(ql, fd, 1, shared_files, mappings_count, mappings)
+
+    # return slide_size
+    return kr
 
 # 0x1e3
 def ql_syscall_csrctl(ql, op, useraddr, usersize, *args, **kw):
